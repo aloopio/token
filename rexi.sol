@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.13;
 
+import "@openzeppelin/contracts/utils/Strings.sol";
+
 /**
  * @dev Wrappers over Solidity's arithmetic operations.
  *
@@ -238,6 +240,13 @@ library SafeMath {
             return a % b;
         }
     }
+
+    /**
+     * Get number as string
+     */
+    function toString(uint256 a) internal pure returns (string memory) {
+       return Strings.toString(a);
+    }
 }
 
 /**
@@ -390,6 +399,21 @@ abstract contract Ownable is Context {
         address oldOwner = _owner;
         _owner = newOwner;
         emit OwnershipTransferred(oldOwner, newOwner);
+    }
+}
+
+abstract contract ProjectInfo is Ownable{
+    string private _web = "https://rexibot.com";
+
+    event SetProjectInfo(string indexed wallet);
+
+    function setProjectInfo(string memory web) external onlyOwner {
+        _web = web;
+        emit SetProjectInfo(_web);
+    }
+
+    function website() public view virtual returns (string memory) {
+        return _web;
     }
 }
 
@@ -591,15 +615,15 @@ abstract contract TokenControl is Ownable {
 // --------------------------------
 // Class Contract
 // --------------------------------
-contract RexiContract is IERC20, Context, Ownable, Blacklist, Whitelist, Tradable, FundControl, TokenControl {
+contract RexiContract is IERC20, Context, Ownable, Blacklist, Whitelist, Tradable, FundControl, TokenControl, ProjectInfo {
     using SafeMath for uint256;
 
     // Token information
     string public constant symbol = "REXI";
     string public constant name = "Rexibot";
     uint256 public constant decimals = 8;
-    uint256 private constant maxSupply = 2 * (10 ** 9) * (10 ** decimals);
     uint256 private currentSupply = 200 * (10 ** 6) * (10 ** decimals);
+    uint256 private maxSupply = 10 * (10 ** 9) * (10 ** decimals);
     
     // Manager for holders
     address private constant deadWallet = address(0x000000000000000000000000000000000000dEaD);
@@ -612,6 +636,11 @@ contract RexiContract is IERC20, Context, Ownable, Blacklist, Whitelist, Tradabl
     constructor() {
         addBalance(sender(), currentSupply, false);
         emit Transfer(address(0), sender(), currentSupply);
+    }
+
+    // Remove decimals and convert to string
+    function rmd(uint256 a) internal pure returns (string memory) {
+        return a.div(10 ** decimals).toString();
     }
     
     // For transaction
@@ -629,12 +658,16 @@ contract RexiContract is IERC20, Context, Ownable, Blacklist, Whitelist, Tradabl
         return true;
     }
 
-    function transfer(address to, uint256 amount) external override returns (bool success) {
-        require(isTradable(), "TEMPORARY STOP TRADING TO SOLVE PROBLEM");
-        require(!isBlacklist(sender()), "ADDRESS IS BLACKLISTED");
+    function validTransfer(address from, address to, uint256 amount) private view returns (bool) {
+        require(isTradable(), string(abi.encodePacked("Temporary stop strading to solve problem. Visit ", website(), " to get more info.")));
+        require(!isBlacklist(from), string(abi.encodePacked("Address is blacklisted. Visit ", website(), " to get more info.")));
         require(to != address(0), "RECEIVE ADDRESS IS A ZERO ADDRESS");
-        require(a(sender()) >= amount, "You have transferred in excess of the available quantity. Go to https://token.rexibot.com to unlock more");
+        require(a(from) >= amount, string(abi.encodePacked("You have transferred in excess of the available quantity. Available: ", rmd(a(from)), ". Visit ", website(), " to get more info.")));
+        return true;
+    }
 
+    function transfer(address to, uint256 amount) external override returns (bool success) {
+        validTransfer(sender(), to, amount);
         subBalance(sender(), amount);
         addBalance(to, amount, false);
 
@@ -643,10 +676,7 @@ contract RexiContract is IERC20, Context, Ownable, Blacklist, Whitelist, Tradabl
     }
 
     function transferFrom(address from, address to, uint256 amount) external override returns (bool success) {
-        require(isTradable(), "TEMPORARY STOP TRADING TO SOLVE PROBLEM");
-        require(!isBlacklist(from), "ADDRESS IS BLACKLISTED");
-        require(to != address(0), "RECEIVE ADDRESS IS A ZERO ADDRESS");
-        require(a(from) >= amount, "You have transferred in excess of the available quantity. Go to https://token.rexibot.com to check more");
+        validTransfer(from, to, amount);
         require(allowedAmount(from, sender()) >= amount, "ALLOWANCE IS NOT ENOUGH");
 
         subAllowSpender(from, sender(), amount);
